@@ -1,4 +1,5 @@
-#Tsewang Stanzin
+# Check for IERS timings, talk to camera serially.
+
 import numpy as np
 import matplotlib
 import astroplan
@@ -8,15 +9,23 @@ from astropy.coordinates import SkyCoord
 from astropy.coordinates import EarthLocation
 from astroplan import Observer, FixedTarget
 from astropy.utils import iers
+from astroplan.utils import IERS_A_in_cache
 from astropy.coordinates import get_sun, get_moon, get_body
 from astroplan import moon_illumination
 import matplotlib.pyplot as plt
 from astroplan.plots import plot_sky, plot_airmass
-
 import socket
-from ctypes._aix import get_version
+# from ctypes._aix import get_version
 import serial
+from PIL import Image, ImageDraw, ImageFont
+
+# from astropy import log
+# log.disable_warnings_logging()
+# log.setLevel('CRITICAL')
 ### StellaCam routines
+# from plan import moon_rise
+
+
 class StellaCam:
 
     def __init__(self, ser_port):
@@ -32,8 +41,6 @@ class StellaCam:
     def command(self, string):
         self.port.write(string.encode())
 
-    # send command to get the stellacam's firmware version.
-    # used this to kick a misbehaving stellacam into shape.
     def get_version(self):
         self.command("?V")
         result = self.port.read(6)
@@ -49,24 +56,12 @@ class StellaCam:
 
     # configure stella_cam
     def configure(self, gain, frame, gamma, iris):
-        if (gain < 1 or gain > 127):
-            gain = 127
 
-        if (frame >= 0 and frame < 10):
-            rate = self.video_rates[frame]
-        else:
-            rate = 10
-
-        if (gamma < 0 or gamma > 2):
-            gamma = 2
-
-        if (iris < 0 or iris > 1):
-            iris = 0
+        rate = frame
         # put the commands into the appropriate bytes using bitwise operators
         data1 = 1 + (gain << 1)
         data2 = 1 + (gamma << 2) + (rate << 4)
         control = 1 + (0 << 1) + (0 << 2) + (1 << 3) + (iris << 4) + (0 << 5) + (0 << 6) + (0 << 7)
-        # print control
         data1 = self.part_pack(data1)
         data2 = self.part_pack(data2)
         control = self.part_pack(control)
@@ -77,7 +72,6 @@ class StellaCam:
         self.rts(0)
         # puts "config = #{out}"
 
-    # Have not tested this function. Mostly you need to change this function before using it
     def signals(self):
         self.port.signals
 
@@ -87,7 +81,6 @@ class StellaCam:
     def dtr(self, flag):
         self.port.setDTR(flag)
 
-    # Have not tested this function. Mostly you need to change this function before using it because this function is using
     def dec2bin(self, num):
         array = [num]
         str = array.pack("N").unpack("B32")
@@ -99,9 +92,17 @@ class StellaCam:
         self.port.close
         self.port = nil
 
+
 class Automation:
-    def iers(self):
-        astroplan.get_IERS_A_or_workaround()
+    eve_twilight_flag = 0
+    mor_twilight_flag = 0
+    moon_setting_flag = 0
+    moon_strength = 0
+
+    def eop(self):
+
+        IERS_A_in_cache()
+        # astroplan.get_IERS_A_or_workaround()
         iers.conf.auto_download = False
         iers.conf.auto_max_age = None
         now = Time.now()
@@ -110,7 +111,7 @@ class Automation:
         latitude = '32d46m44s'
         elevation = 4500 * u.m
         location = EarthLocation.from_geodetic(longitude, latitude, elevation)
-        iaohanle = Observer(location=location, timezone='Asia/Kolkata',name="IAO", description="IAO Hanle telescopes")
+        iaohanle = Observer(location=location, timezone='Asia/Kolkata', name="IAO", description="IAO Hanle telescopes")
         iaohanle
         # Calculating the sunset, midnight and sunrise times for our observatory
         sunset_iao = iaohanle.sun_set_time(now, which='nearest')
@@ -118,45 +119,139 @@ class Automation:
         midnight_iao = iaohanle.midnight(now, which='next')
         morn_twil_iao = iaohanle.twilight_morning_astronomical(now, which='next')
         sunrise_iao = iaohanle.sun_rise_time(now, which='next')
+        moon_rise = iaohanle.moon_rise_time(eve_twil_iao, which='nearest')
+        moon_set = iaohanle.moon_set_time(now ,which='nearest')
+        # moon_alt = iaohanle.moon_altaz(now).alt
+        # moon_az = iaohanle.moon_altaz(now).az
+        #lst_now = iaohanle.local_sidereal_time(now)
+        #lst_mid = iaohanle.local_sidereal_time(midnight_iao)
+        #print("LST at IAO now is {0:.2f}".format(lst_now))
+        #print("LST at IAO at local midnight will be {0:.2f}".format(lst_mid))
 
-        moon_rise = iaohanle.moon_rise_time(now)
-        moon_set = iaohanle.moon_set_time(now)
-        moon_alt = iaohanle.moon_altaz(now).alt
-        moon_az = iaohanle.moon_altaz(now).az
-        print("Current Time (Please note all time should be in UTC)   ",now)
-        print("Sunset at IAO will be at {0.iso} UTC  ".format(sunset_iao))
-        print("Astronomical evening twilight at IAO will be at {0.iso} UTC  ".format(eve_twil_iao))
-        #print("Midnight at IAO will be at {0.iso} UTC   ".format(midnight_iao))
-        print("Astronomical morning twilight at IAO will be at {0.iso} UTC  ".format(morn_twil_iao))
-        print("Sunrise at IAO will be at {0.iso} UTC   ".format(sunrise_iao))
-
-        print("Moon's Illumination Strength Tonight  ", moon_illumination(midnight_iao))
-        print("Moon Rise at IAO will be at {0.iso} UTC   ".format(moon_rise))
-        print("Moon Set at IAO will be at {0.iso} UTC  ".format(moon_set))
+        Automation.moon_strength = moon_illumination(midnight_iao)
 
         observing_time = (morn_twil_iao - eve_twil_iao).to(u.h)
-        print("Total Night hours at IAO tonight  {0:.1f}  ".format(observing_time))
-        flag=0
-        if(morn_twil_iao==now):
-            print("Changing the parameters for morning twilight")
-        elif(eve_twil_iao<=now):
-            print("Changing the parameters for Evening twilight")
-        elif(sunset_iao<=now):
-            flag=1
-            print("Sunsssssssssssssssseeeeeeeeeeeeeeeet ,,, changeeeeeeeeee", flag)
-        else:
-            print("Keeping the current parameters")
+        #print("Total Night hours at IAO tonight  {0:.1f}  ".format(observing_time))
+
+        img = Image.new('RGB', (850, 320), color=(0, 0, 0))
+        fnt = ImageFont.truetype('/var/lib/defoma/gs.d/dirs/fonts/DejaVuSerif.ttf', 15)
+        d = ImageDraw.Draw(img)
+        d.text((10, 11), "IAO Hanle Coordinates:   " + str(iaohanle), font=fnt, fill=(255, 255, 255))
+
+        d.text((10, 71), "Moon Illumination Strength          : " + str(moon_illumination(midnight_iao)), font=fnt,
+               fill=(255, 255, 255))
+        d.text((10, 101),
+               "Sunset                                       : " + Time(sunset_iao, out_subfmt='date_hms').iso + " UTC",
+               font=fnt, fill=(255, 255, 255))
+        d.text((10, 131), "Astronomical evening twilight : " + Time(eve_twil_iao, out_subfmt='date_hms').iso + " UTC",
+               font=fnt, fill=(255, 255, 255))
+        d.text((10, 161), "Astronomical morning twilight : " + Time(morn_twil_iao, out_subfmt='date_hms').iso + " UTC",
+               font=fnt, fill=(255, 255, 255))
+        d.text((10, 191),
+               "Sunrise                                   : " + Time(sunrise_iao, out_subfmt='date_hms').iso + " UTC",
+               font=fnt, fill=(255, 255, 255))
+        d.text((10, 221), "Moon Rise                    : " + Time(moon_rise, out_subfmt='date_hms').iso + " UTC", font=fnt, fill=(255, 255, 255))
+
+        d.text((10, 251), "Moon Set                    : " + Time(moon_set, out_subfmt='date_hms').iso + " UTC", font=fnt, fill=(255, 255, 255))
+        d.text((10, 281), "Total Astronomical hours tonight                    : " + str(observing_time) ,
+               font=fnt, fill=(255, 255, 255))
+        img.save('tonight.png')
+        img.close()
+
+        t_start = eve_twil_iao
+        t_end = morn_twil_iao
+
+        # We can turn solar system objects into 'pseudo-fixed' targets to plan observations
+        mercury_midnight = FixedTarget(name='Mercury', coord=get_body('mercury', midnight_iao))
+        mercury_midnight.coord
+        venus_midnight = FixedTarget(name='Venus', coord=get_body('venus', midnight_iao))
+        venus_midnight.coord
+
+        uranus_midnight = FixedTarget(name='Uranus', coord=get_body('uranus', midnight_iao))
+        uranus_midnight.coord
+        neptune_midnight = FixedTarget(name='Neptune', coord=get_body('neptune', midnight_iao))
+        neptune_midnight.coord
+
+        saturn_midnight = FixedTarget(name='Saturn', coord=get_body('saturn', midnight_iao))
+        saturn_midnight.coord
+
+        jupiter_midnight = FixedTarget(name='Jupiter', coord=get_body('jupiter', midnight_iao))
+        jupiter_midnight.coord
+
+        mars_midnight = FixedTarget(name='Mars', coord=get_body('mars', midnight_iao))
+        mars_midnight.coord
+
+        targets = [mercury_midnight, venus_midnight, mars_midnight, jupiter_midnight, saturn_midnight, uranus_midnight,
+                   neptune_midnight]
+        targets
+
+        #for target in targets:
+            #print(iaohanle.target_rise_time(now, target, which='next', horizon=10 * u.deg).iso)
+
+        # iaohanle.altaz(now, targets[0])
+
+        # print(iaohanle.target_rise_time(now, target, which='next', horizon=10 * u.deg).iso)
+
+        # iaohanle.altaz(now, targets[0])
+
+        times = (t_start - 0.5 * u.h) + (t_end - t_start + 1 * u.h) * np.linspace(0.0, 1.0, 20)
+        for target in targets:
+            plot_sky(target, iaohanle, times)
+        plt.legend(loc=[1.0, 0])
+        plt.xlabel('Planets motion tonight')
+
+        # plt.ylim(4,0.5)
+        # plt.legend()
+        plt.savefig('planets_motion.png')
+        plt.close()
+
+        # plt.legend(loc=[1.1,0])
+
+        coords1 = SkyCoord('15h58m3s', '-18d10m0.0s', frame='icrs')  # coordinates of Andromeda Galaxy (M32)
+        tt1 = FixedTarget(name='Moon', coord=coords1)
+
+        tt1.coord
+        t_observe = t_start + (t_end - t_start) * np.linspace(0.0, 1.0, 20)
+        plot_sky(tt1, iaohanle, t_observe)
+        plt.xlabel('Moon motion tonight')
+        plt.savefig('moon_motion.png')
+        plt.close()
+
+        if (eve_twil_iao <= now):
+            Automation.eve_twilight_flag = 1
+            Automation.mor_twilight_flag = 0
+            Automation.moon_setting_flag = 0
+        elif (morn_twil_iao <= now):
+            Automation.eve_twilight_flag = 0
+            Automation.mor_twilight_flag = 1
+            Automation.moon_setting_flag = 0
+        elif (Automation.moon_strength > 0.30):
+            if (moon_rise <= now):
+                Automation.eve_twilight_flag = 0
+                Automation.mor_twilight_flag = 0
+                Automation.moon_setting_flag = 1
+            elif (moon_set <= now):
+                Automation.eve_twilight_flag = 1
+                Automation.mor_twilight_flag = 0
+                Automation.moon_setting_flag = 0
 
 
-#stella=StellaCam('/dev/ttyUSB0')
-#stella.get_version()
-auto=Automation()
-auto.iers()
+auto = Automation()
+auto.eop()
+stella = StellaCam('/dev/ttyS0')
+stella.get_version()
+stella.configure(int(0), int(0), int(0), int(1))
+if (auto.eve_twilight_flag == 1):
+    print("Changing to night parameter")
+    stella.get_version()
+    stella.configure(int(70), int(7), int(0), int(1))
+elif (auto.mor_twilight_flag == 1):
+    print("Changing to day parameter")
+    stella.get_version()
+    stella.configure(int(1), int(0), int(0), int(1))
+elif (auto.moon_setting_flag == 1):
+    print("Moon Stregth:   ", auto.moon_strength)
+    print("Changing to mooon parameter")
+    stella.get_version()
+    stella.configure(int(60), int(5), int(0), int(1))
 
-#print("Sunset", sunset_iao)
-
-gain_set=int(30)
-frame_set = int(0)
-gamma_set = int(0)
-iris_set=int(1)
-#stella.configure(gain_set,frame_set,gamma_set,iris_set)

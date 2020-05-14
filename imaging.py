@@ -22,19 +22,19 @@ plt.style.use(astropy_mpl_style)
 
 previous_date=datetime.strftime(datetime.now() - timedelta(1), '%Y%m%d')
 now = datetime.now()
-newDirName='/home/tsewang/Desktop/Stellacam/stellaimage/UploadWebsite/'+now.strftime("%Y%m%d")
+newDirName='/opt/lampp/htdocs/IAO/sky/allskycamera/'+now.strftime("%Y%m%d")
 # Create target Directory if don't exist
 if not os.path.exists(newDirName):
 	os.mkdir(newDirName)
-	os.mkdir(newDirName+'/fits/')
+	os.mkdir(newDirName+'/0_fits/')
 	print("New Date Directory Created...Creating a movie of previous date........Wait")
 
-	save_path = '/home/tsewang/Desktop/Stellacam/stellaimage/UploadWebsite/Movies/'+previous_date+'.mp4'
+	save_path = '/opt/lampp/htdocs/IAO/sky/allskycamera/Movies/'+previous_date+'.mp4'
 	ap = argparse.ArgumentParser()
 	ap.add_argument("-ext", "--extension", required=False, default='png', help="extension name. default is 'png'.")
 	ap.add_argument("-o", "--output", required=False, default=save_path, help="output video file")
 	args = vars(ap.parse_args())
-	movieimage_path = '/home/tsewang/Desktop/Stellacam/stellaimage/UploadWebsite/'+previous_date
+	movieimage_path = '/opt/lampp/htdocs/IAO/sky/allskycamera/'+previous_date
 	ext = args['extension']
 	output = args['output']
 	images = []
@@ -63,8 +63,8 @@ else:
 
 stamped_dst = newDirName;
 
-src = '/home/tsewang/Desktop/Stellacam/stellaimage/Archive/';
-dst = '/home/tsewang/Desktop/Stellacam/stellaimage/UploadWebsite/latest.png';
+src = '/home/iiap/Desktop/stellacam/Temp/';
+dst = '/opt/lampp/htdocs/IAO/sky/allskycamera/latest.png';
 
 
 
@@ -103,7 +103,7 @@ for fname in arr:
 	shutil.move(srcpath,stamped_dst);
        	#Take the image form stamped_dst ,  convert  to fits and edit the header.. correct the image and replace back the png      
 	png_file=stamped_dst + '/' + fname
-	fits_file=stamped_dst+'/fits/'+ bname + '.fits';	
+	fits_file=stamped_dst+'/0_fits/'+ bname + '.fits';	
 	
 	image = Image.open(png_file)
 	xsize, ysize = image.size
